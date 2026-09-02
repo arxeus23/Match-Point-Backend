@@ -1,0 +1,129 @@
+name: matchpoint
+
+x-laravel-environment: &laravel-environment
+  APP_NAME: MatchPoint HR
+  APP_ENV: local
+  APP_KEY: ${APP_KEY:-base64:Qf3BM4WlE3V3dN8wwUSfZnJrRqoj71TRFx0f0QZV+po=}
+  APP_DEBUG: "true"
+  APP_URL: http://localhost:8000
+  LOG_CHANNEL: stderr
+  DB_CONNECTION: pgsql
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_DATABASE: ${DB_DATABASE:-matchpoint}
+  DB_USERNAME: ${DB_USERNAME:-matchpoint}
+  DB_PASSWORD: ${DB_PASSWORD:-matchpoint}
+  CACHE_STORE: redis
+  SESSION_DRIVER: redis
+  QUEUE_CONNECTION: redis
+  REDIS_CLIENT: phpredis
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+
+x-laravel-service: &laravel-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment: *laravel-environment
+  volumes:
+    - ./:/var/www/html
+    - backend_vendor:/var/www/html/vendor
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  app:
+    <<: *laravel-service
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm -t || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    <<: *laravel-service
+    command: php artisan migrate --force --no-interaction
+    restart: "no"
+
+  queue:
+    <<: *laravel-service
+    command: php artisan queue:work --sleep=3 --tries=3 --timeout=90
+
+  api:
+    image: nginx:1.29-alpine
+    ports:
+      - "${API_PORT:-8000}:80"
+    volumes:
+      - ./:/var/www/html:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../../../../MyDownloads/Match-Point-Frontend
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_URL: http://localhost:${API_PORT:-8000}
+      CHOKIDAR_USEPOLLING: "true"
+    command: sh /app/docker/start-dev.sh
+    ports:
+      - "${FRONTEND_PORT:-3000}:5173"
+    init: true
+    volumes:
+      - ../../../../MyDownloads/Match-Point-Frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5173 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-matchpoint}
+      POSTGRES_USER: ${DB_USERNAME:-matchpoint}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-matchpoint}
+    ports:
+      - "${DB_PORT_FORWARD:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.2-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT_FORWARD:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  backend_vendor:
+  frontend_node_modules:
+  postgres_data:
+  redis_data:
