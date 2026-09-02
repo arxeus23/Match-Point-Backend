@@ -26,8 +26,15 @@ x-laravel-service: &laravel-service
     dockerfile: Dockerfile
   environment: *laravel-environment
   volumes:
-    - ./:/var/www/html
-    - backend_vendor:/var/www/html/vendor
+    - ./app:/var/www/html/app
+    - ./bootstrap:/var/www/html/bootstrap
+    - ./config:/var/www/html/config
+    - ./database:/var/www/html/database
+    - ./public:/var/www/html/public
+    - ./resources:/var/www/html/resources
+    - ./routes:/var/www/html/routes
+    - ./storage:/var/www/html/storage
+    - ./artisan:/var/www/html/artisan
   depends_on:
     postgres:
       condition: service_healthy
@@ -58,7 +65,7 @@ services:
     ports:
       - "${API_PORT:-8000}:80"
     volumes:
-      - ./:/var/www/html:ro
+      - ./public:/var/www/html/public:ro
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       app:
@@ -123,7 +130,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  backend_vendor:
   frontend_node_modules:
   postgres_data:
   redis_data:
